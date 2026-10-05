@@ -1,3 +1,4 @@
 customtkinter
 networkx
 matplotlib
+pillow

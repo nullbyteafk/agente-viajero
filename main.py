@@ -13,6 +13,7 @@ Idea general del programa
 """
 
 import math
+import os
 import random
 import threading
 import time
@@ -22,15 +23,25 @@ from tkinter import messagebox
 import networkx as nx
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from PIL import Image
 
 
 # =====================================================================
 #  DATOS DEL PROYECTO
 # =====================================================================
-CURSO = "Matemática Computacional · 1AMA0475"
 UNIVERSIDAD = "Universidad Peruana de Ciencias Aplicadas"
-INTEGRANTES = ["Coras Zelada, Bruno Enrique"]
+FACULTAD = "Facultad de Ingeniería"
+CURSO = "1AMA0475 · Matemática Computacional"
+SECCION = "2911"
+DOCENTE = "Mattos Quevedo, Juan Manuel"
 CICLO = "2026-02"
+INTEGRANTES = [            # (nombre, código)
+    ("Coras Zelada, Bruno Enrique", "u202424853"),
+    ("Condori Ramos, Aldo", "u202419673"),
+    ("Lopez Atencia, Jhonatan Ismael", "u202416648"),
+    ("Romero Pasache, Rolando Miguel", "u202313521"),
+]
+LOGO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "upc_logo.png")
 
 MIN_NODOS, MAX_NODOS = 8, 16
 PESO_MIN, PESO_MAX = 9, 100
@@ -195,6 +206,15 @@ def resolver_tsp(M):
 def fmt(num):
     """12345678 -> '12 345 678'"""
     return f"{num:,}".replace(",", " ")
+
+
+def cargar_logo(tamano):
+    """Devuelve el logo como CTkImage, o None si el archivo no está."""
+    try:
+        img = Image.open(LOGO)
+        return ctk.CTkImage(light_image=img, dark_image=img, size=(tamano, tamano))
+    except (OSError, FileNotFoundError):
+        return None
 
 
 # =====================================================================
@@ -380,15 +400,22 @@ class App(ctk.CTk):
         # --- Pie ---
         pie = ctk.CTkFrame(p, fg_color="transparent")
         pie.pack(side="bottom", fill="x", padx=22, pady=20)
-        ctk.CTkLabel(pie, text=INTEGRANTES[0], font=(F, 12),
-                     text_color=SUAVE).pack(anchor="w", pady=(10, 0))
+
         fila = ctk.CTkFrame(pie, fg_color="transparent")
-        fila.pack(fill="x", before=pie.winfo_children()[0])
+        fila.pack(fill="x")
         for texto, cmd in (("¿Cómo funciona?", self.abrir_guia),
                            ("Créditos", self.abrir_creditos)):
             ctk.CTkButton(fila, text=texto, height=32, fg_color=PANEL2,
                           hover_color=BORDE, font=(F, 13), corner_radius=8,
                           command=cmd).pack(side="left", expand=True, fill="x", padx=2)
+
+        marca = ctk.CTkFrame(pie, fg_color="transparent")
+        marca.pack(fill="x", pady=(14, 0))
+        logo = cargar_logo(34)
+        if logo:
+            ctk.CTkLabel(marca, image=logo, text="").pack(side="left", padx=(0, 10))
+        ctk.CTkLabel(marca, text=f"UPC · Sección {SECCION}\n{CURSO.split(' · ')[1]}",
+                     font=(F, 12), text_color=SUAVE, justify="left").pack(side="left")
 
     def _crear_centro(self):
         c = ctk.CTkFrame(self, fg_color="transparent")
@@ -710,11 +737,61 @@ class App(ctk.CTk):
             "no puede existir un ciclo hamiltoniano."), alto=620)
 
     def abrir_creditos(self):
-        self._ventana_info("Créditos", (
-            f"Proyecto desarrollado para el curso\n{CURSO}\n\n"
-            f"{UNIVERSIDAD}\n\n"
-            "Integrante:\n" + "\n".join(f"• {x}" for x in INTEGRANTES) +
-            f"\n\nCiclo {CICLO}"), alto=380)
+        v = ctk.CTkToplevel(self)
+        v.title("Créditos")
+        v.geometry(f"560x{560 + 40 * len(INTEGRANTES)}")
+        v.resizable(False, False)
+        v.configure(fg_color=BG)
+        v.transient(self)
+        v.after(150, v.lift)
+
+        # Encabezado: logo + universidad
+        logo = cargar_logo(96)
+        if logo:
+            ctk.CTkLabel(v, image=logo, text="").pack(pady=(26, 10))
+        ctk.CTkLabel(v, text=UNIVERSIDAD.upper(), font=(F, 15, "bold"),
+                     text_color=TEXTO).pack(pady=(0 if logo else 26, 0))
+        ctk.CTkLabel(v, text=FACULTAD, font=(F, 13),
+                     text_color=SUAVE).pack()
+
+        # Datos del curso
+        datos = ctk.CTkFrame(v, fg_color=PANEL, corner_radius=14)
+        datos.pack(fill="x", padx=28, pady=(18, 12))
+        datos.grid_columnconfigure(1, weight=1)
+        for fila, (etq, val) in enumerate((("Curso", CURSO),
+                                           ("Sección", SECCION),
+                                           ("Docente", DOCENTE),
+                                           ("Ciclo", CICLO))):
+            ctk.CTkLabel(datos, text=etq, font=(F, 13), text_color=SUAVE,
+                         anchor="w").grid(row=fila, column=0, sticky="w",
+                                          padx=(18, 12), pady=(12 if fila == 0 else 3,
+                                                               12 if fila == 3 else 3))
+            ctk.CTkLabel(datos, text=val, font=(F, 13, "bold"), text_color=TEXTO,
+                         anchor="w").grid(row=fila, column=1, sticky="w",
+                                          pady=(12 if fila == 0 else 3,
+                                                12 if fila == 3 else 3))
+
+        # Tabla de integrantes
+        ctk.CTkLabel(v, text="INTEGRANTES", font=(F, 13, "bold"),
+                     text_color=SUAVE).pack(anchor="w", padx=30, pady=(6, 6))
+        tabla = ctk.CTkFrame(v, fg_color=PANEL, corner_radius=14)
+        tabla.pack(fill="x", padx=28)
+        tabla.grid_columnconfigure(0, weight=1)
+        for col, txt in enumerate(("Nombre", "Código")):
+            ctk.CTkLabel(tabla, text=txt, font=(F, 12, "bold"), text_color=ACENTO,
+                         anchor="w").grid(row=0, column=col, sticky="w",
+                                          padx=18, pady=(12, 4))
+        for i, (nombre, codigo) in enumerate(INTEGRANTES, start=1):
+            ultimo = i == len(INTEGRANTES)
+            ctk.CTkLabel(tabla, text=nombre, font=(F, 14), text_color=TEXTO,
+                         anchor="w").grid(row=i, column=0, sticky="w",
+                                          padx=18, pady=(4, 12 if ultimo else 4))
+            ctk.CTkLabel(tabla, text=codigo, font=(MONO, 13), text_color=SUAVE,
+                         anchor="w").grid(row=i, column=1, sticky="w",
+                                          padx=18, pady=(4, 12 if ultimo else 4))
+
+        ctk.CTkButton(v, text="Cerrar", fg_color=ACENTO, hover_color=ACENTO_H,
+                      corner_radius=10, command=v.destroy).pack(pady=20)
 
     def _salir(self):
         self._detener_animacion()

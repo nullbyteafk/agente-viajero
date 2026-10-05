@@ -2,7 +2,16 @@
 
 Aplicación de escritorio en Python que encuentra la **ruta de menor costo** que sale de un nodo, visita todos los demás exactamente una vez y regresa al inicio (**ciclo hamiltoniano mínimo**).
 
-Proyecto del curso **Matemática Computacional (1AMA0475)**, Universidad Peruana de Ciencias Aplicadas, ciclo 2026-02.
+<p align="center"><img src="assets/upc_logo.png" width="90" alt="Logo UPC"></p>
+
+| | |
+|---|---|
+| **Universidad** | Universidad Peruana de Ciencias Aplicadas (UPC) |
+| **Facultad** | Facultad de Ingeniería |
+| **Curso** | 1AMA0475 · Matemática Computacional |
+| **Sección** | 2911 |
+| **Docente** | Mattos Quevedo, Juan Manuel |
+| **Ciclo** | 2026-02 |
 
 ## Funcionalidades
 
@@ -41,6 +50,11 @@ python main.py
 
 En el modo manual, las conexiones se escriben una por línea con el formato `origen destino costo` (por ejemplo `0 3 25`).
 
-## Autor
+## Integrantes
 
-- Coras Zelada, Bruno Enrique
+| Nombre | Código |
+|---|---|
+| Coras Zelada, Bruno Enrique | u202424853 |
+| Condori Ramos, Aldo | u202419673 |
+| Lopez Atencia, Jhonatan Ismael | u202416648 |
+| Romero Pasache, Rolando Miguel | u202313521 |
