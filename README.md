@@ -15,18 +15,35 @@ Aplicación de escritorio en Python que encuentra la **ruta de menor costo** que
 
 ## Funcionalidades
 
-- Grafos de 8 a 16 nodos: **completos**, **parciales** (densidad ajustable) o **manuales**.
-- Visualización del grafo y de su **matriz de adyacencia**.
-- Cálculo exacto de la ruta óptima con el algoritmo de **Held-Karp**.
-- Conteo total de ciclos hamiltonianos existentes.
-- Animación del recorrido paso a paso.
+- Grafos de 5 a 10 nodos: **completos**, **parciales** (densidad ajustable) o **manuales**.
+- Visualización del grafo (con el peso de todas sus aristas) y de su **matriz de adyacencia**.
+- Cálculo exacto de la ruta óptima con el algoritmo de **fuerza bruta**.
+- Comparación con **Held-Karp**: el programa muestra que ambos dan el mismo costo mínimo y cuánto tardó cada uno.
+- Pestaña **Todos los caminos**: lista cada ciclo hamiltoniano existente con su etiqueta (C1, C2, …), su recorrido y su costo, y marca la ruta óptima con ★.
+- Dibujar cualquier camino de la lista en el grafo escribiendo su número.
+- Animación del recorrido óptimo paso a paso.
 - Diagnóstico cuando no existe solución (grafo no conexo o nodos con grado < 2).
 
 ## Algoritmo
 
-Probar todas las rutas (fuerza bruta) requiere revisar `(n−1)!/2` ciclos: con 16 nodos son **653 837 184 000**.
+Se fija el nodo 0 como punto de partida y se generan **todas las permutaciones** de los demás nodos con `itertools.permutations`, es decir `(n−1)!` rutas.
 
-Held-Karp usa **programación dinámica con máscaras de bits**:
+Cada ciclo se puede recorrer en dos sentidos con el mismo costo (`0→1→2→0` y `0→2→1→0`), así que solo se evalúa una de las dos versiones y se revisan `(n−1)!/2` rutas.
+
+Para cada ruta se suman los costos de sus tramos; si algún tramo no existe en el grafo, la ruta se descarta. Todas las rutas válidas se guardan como caminos existentes y al final se elige la de menor costo.
+
+| Nodos | Rutas evaluadas `(n−1)!/2` |
+|---|---|
+| 5 | 12 |
+| 6 | 60 |
+| 7 | 360 |
+| 8 | 2 520 |
+| 9 | 20 160 |
+| 10 | 181 440 |
+
+### Comparación con Held-Karp
+
+El programa también resuelve el mismo grafo con **Held-Karp** (programación dinámica con máscaras de bits):
 
 ```
 dp[S][j] = costo mínimo de un camino que sale de 0,
@@ -34,7 +51,7 @@ dp[S][j] = costo mínimo de un camino que sale de 0,
            y termina en el nodo j
 ```
 
-Así la complejidad baja a **O(n² · 2ⁿ)** (≈ 16,8 millones de pasos con 16 nodos) y el resultado sigue siendo el óptimo exacto.
+Su complejidad es **O(n² · 2ⁿ)**, frente a **O(n!)** de la fuerza bruta. Ambos son exactos y dan el mismo costo mínimo, pero Held-Karp no revisa las rutas una por una, por eso la lista de todos los caminos sale de la fuerza bruta.
 
 ## Instalación y uso
 
@@ -46,7 +63,8 @@ python main.py
 1. Elige la cantidad de nodos y el tipo de grafo.
 2. Presiona **Generar grafo**.
 3. Presiona **Calcular ruta óptima**.
-4. Opcional: **Animar recorrido**.
+4. Revisa la pestaña **Todos los caminos** y dibuja el que quieras.
+5. Opcional: **Animar recorrido**.
 
 En el modo manual, las conexiones se escriben una por línea con el formato `origen destino costo` (por ejemplo `0 3 25`).
 
@@ -58,3 +76,4 @@ En el modo manual, las conexiones se escriben una por línea con el formato `ori
 | Condori Ramos, Aldo | u202419673 |
 | Lopez Atencia, Jhonatan Ismael | u202416648 |
 | Romero Pasache, Rolando Miguel | u202313521 |
+| Lorenzo Nicolas, Luana Suhey | u202414362 |

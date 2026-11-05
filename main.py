@@ -7,11 +7,13 @@ Idea general del programa
 1. Se construye un grafo no dirigido y ponderado (aleatorio o ingresado a mano).
 2. Se busca el ciclo hamiltoniano de menor costo: una ruta que sale del nodo 0,
    visita cada nodo exactamente una vez y vuelve al nodo 0.
-3. Para resolverlo se usa el algoritmo de Held-Karp (programación dinámica),
-   que es exacto (siempre encuentra el óptimo) y mucho más rápido que probar
-   todas las rutas por fuerza bruta.
+3. Para resolverlo se usa el algoritmo de fuerza bruta: se prueban todas las
+   rutas posibles (permutaciones de los nodos) y se guarda cada camino válido.
+   Es exacto (siempre encuentra el óptimo) y además permite mostrar todos los
+   caminos existentes con su etiqueta (C1, C2, ...) y su costo.
 """
 
+import itertools
 import math
 import os
 import random
@@ -40,10 +42,11 @@ INTEGRANTES = [            # (nombre, código)
     ("Condori Ramos, Aldo", "u202419673"),
     ("Lopez Atencia, Jhonatan Ismael", "u202416648"),
     ("Romero Pasache, Rolando Miguel", "u202313521"),
+    ("Lorenzo Nicolas, Luana Suhey", "u202414362"),
 ]
 LOGO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "upc_logo.png")
 
-MIN_NODOS, MAX_NODOS = 8, 16
+MIN_NODOS, MAX_NODOS = 5, 10
 PESO_MIN, PESO_MAX = 9, 100
 
 # =====================================================================
@@ -133,9 +136,62 @@ def diagnostico(G):
     return None
 
 
-def resolver_tsp(M):
+def costo_ruta(M, ruta):
+    """Suma los costos de los tramos de la ruta. Si algún tramo no existe
+    en el grafo (vale 0 en la matriz), la ruta no es válida y devuelve None."""
+    total = 0
+    for a, b in zip(ruta, ruta[1:]):
+        if M[a][b] == 0:
+            return None
+        total += M[a][b]
+    return total
+
+
+def fuerza_bruta(M):
+    """
+    Algoritmo de fuerza bruta.
+
+    1. Se fija el nodo 0 como inicio y fin del recorrido.
+    2. Se generan todas las permutaciones de los demás nodos: (n-1)! rutas.
+    3. Un ciclo recorrido al revés cuesta lo mismo (0→1→2→0 = 0→2→1→0),
+       así que solo se evalúa una de las dos versiones: (n-1)!/2 rutas.
+    4. Cada ruta válida se guarda como un camino existente.
+    5. La ruta óptima es el camino de menor costo.
+
+    Complejidad: O(n!), por eso el programa trabaja de 5 a 10 nodos.
+    """
+    n = len(M)
+    caminos = []           # todos los caminos válidos (ciclos hamiltonianos)
+    evaluadas = 0          # cuántas rutas se revisaron
+    for perm in itertools.permutations(range(1, n)):
+        # descartar la versión invertida del mismo ciclo
+        if perm[0] > perm[-1]:
+            continue
+        evaluadas += 1
+        ruta = [0, *perm, 0]               # salir del 0 y volver al 0
+        costo = costo_ruta(M, ruta)
+        if costo is not None:              # solo si todos los tramos existen
+            caminos.append({"ruta": ruta, "costo": costo})
+
+    if not caminos:
+        return None
+
+    # la ruta óptima es la de menor costo entre todos los caminos
+    mejor = min(caminos, key=lambda c: c["costo"])
+    return {
+        "costo": mejor["costo"],
+        "ruta": mejor["ruta"],
+        "ciclos": len(caminos),
+        "caminos": caminos,
+        "evaluadas": evaluadas,
+    }
+
+
+def held_karp(M):
     """
     Algoritmo de Held-Karp (programación dinámica con máscaras de bits).
+    Se usa para comparar: debe dar el mismo costo mínimo que la fuerza bruta,
+    pero en mucho menos tiempo.
 
     Una 'máscara' es un número cuyos bits indican qué nodos ya se visitaron.
       dp[mask][j]  = menor costo de un camino que sale de 0, visita
@@ -305,7 +361,7 @@ class App(ctk.CTk):
 
         self.G = None            # grafo actual
         self.pos = None          # posiciones de los nodos para dibujar
-        self.resultado = None    # respuesta de resolver_tsp
+        self.resultado = None    # respuesta de fuerza_bruta
         self._animando = None
 
         self.grid_columnconfigure(1, weight=1)
@@ -342,14 +398,14 @@ class App(ctk.CTk):
         # --- Paso 1: configurar el grafo ---
         self._titulo_paso(p, "1", "Configura el grafo")
 
-        self.lbl_nodos = ctk.CTkLabel(p, text="Cantidad de nodos: 10",
+        self.lbl_nodos = ctk.CTkLabel(p, text=f"Cantidad de nodos: {MIN_NODOS}",
                                       font=(F, 13), text_color=SUAVE)
         self.lbl_nodos.pack(anchor="w", padx=22)
         self.slider_nodos = ctk.CTkSlider(
             p, from_=MIN_NODOS, to=MAX_NODOS, number_of_steps=MAX_NODOS - MIN_NODOS,
             button_color=ACENTO, progress_color=ACENTO,
             command=lambda v: self.lbl_nodos.configure(text=f"Cantidad de nodos: {int(v)}"))
-        self.slider_nodos.set(10)
+        self.slider_nodos.set(MIN_NODOS)
         self.slider_nodos.pack(fill="x", padx=22, pady=(4, 14))
 
         ctk.CTkLabel(p, text="Tipo de grafo", font=(F, 13),
@@ -447,6 +503,26 @@ class App(ctk.CTk):
                                           text_color=TEXTO, wrap="none")
         self.caja_matriz.pack(fill="both", expand=True, padx=8, pady=8)
 
+        # Pestaña con la lista de todos los caminos existentes
+        tab_caminos = self.tabs.add("Todos los caminos")
+        barra = ctk.CTkFrame(tab_caminos, fg_color="transparent")
+        barra.pack(fill="x", padx=8, pady=(8, 0))
+        ctk.CTkLabel(barra, text="Ver camino N°", font=(F, 13),
+                     text_color=SUAVE).pack(side="left")
+        self.entrada_camino = ctk.CTkEntry(barra, width=90, fg_color=PANEL2,
+                                           border_color=BORDE, text_color=TEXTO)
+        self.entrada_camino.pack(side="left", padx=8)
+        self.entrada_camino.bind("<Return>", lambda e: self.ver_camino())
+        ctk.CTkButton(barra, text="Dibujar", width=90, fg_color=ACENTO,
+                      hover_color=ACENTO_H, command=self.ver_camino).pack(side="left")
+        ctk.CTkButton(barra, text="Ver ruta óptima", width=130, fg_color=PANEL2,
+                      hover_color=BORDE, command=self.ver_optima).pack(side="left", padx=8)
+
+        self.caja_caminos = ctk.CTkTextbox(tab_caminos, font=(MONO, 14), fg_color=PANEL,
+                                           text_color=TEXTO, wrap="none")
+        self.caja_caminos.pack(fill="both", expand=True, padx=8, pady=8)
+        self._texto_caminos("Calcula la ruta óptima para ver todos los caminos.")
+
     def _tarjeta(self, master, titulo):
         f = ctk.CTkFrame(master, fg_color=PANEL2, corner_radius=14)
         f.pack(fill="x", padx=16, pady=6)
@@ -466,7 +542,7 @@ class App(ctk.CTk):
 
         self.v_costo = self._tarjeta(d, "Costo mínimo")
         self.v_ciclos = self._tarjeta(d, "Ciclos hamiltonianos existentes")
-        self.v_tiempo = self._tarjeta(d, "Tiempo de cálculo")
+        self.v_tiempo = self._tarjeta(d, "Tiempo de cálculo (fuerza bruta)")
 
         ctk.CTkLabel(d, text="Recorrido paso a paso", font=(F, 13),
                      text_color=SUAVE).pack(anchor="w", padx=18, pady=(12, 4))
@@ -509,6 +585,7 @@ class App(ctk.CTk):
         for v in (self.v_costo, self.v_ciclos, self.v_tiempo):
             v.configure(text="—", text_color=TEXTO)
         self._texto_ruta("Presiona «Calcular ruta óptima».")
+        self._texto_caminos("Calcula la ruta óptima para ver todos los caminos.")
         self._dibujar()
         self._actualizar_matriz()
         self.tabs.set("Grafo")
@@ -524,6 +601,7 @@ class App(ctk.CTk):
             self.v_costo.configure(text="Sin ruta", text_color=RUTA)
             self.v_ciclos.configure(text="0")
             self._texto_ruta("No existe ciclo hamiltoniano.\n\n" + problema)
+            self._texto_caminos("No existe ningún camino.\n\n" + problema)
             return
 
         # El cálculo corre en segundo plano para que la ventana no se congele
@@ -536,9 +614,14 @@ class App(ctk.CTk):
         self._trabajo = {"listo": False}
 
         def tarea():
+            # 1) Fuerza bruta: da la ruta óptima y todos los caminos
             t0 = time.perf_counter()
-            self._trabajo["res"] = resolver_tsp(M)
+            self._trabajo["res"] = fuerza_bruta(M)
             self._trabajo["seg"] = time.perf_counter() - t0
+            # 2) Held-Karp: solo para comparar costo y tiempo
+            t0 = time.perf_counter()
+            self._trabajo["hk"] = held_karp(M)
+            self._trabajo["seg_hk"] = time.perf_counter() - t0
             self._trabajo["listo"] = True
 
         threading.Thread(target=tarea, daemon=True).start()
@@ -552,15 +635,18 @@ class App(ctk.CTk):
         self.progreso.pack_forget()
         self.btn_resolver.configure(state="normal", text="Calcular ruta óptima")
         self.btn_generar.configure(state="normal")
-        self._mostrar_resultado(self._trabajo["res"], self._trabajo["seg"])
+        w = self._trabajo
+        self._mostrar_resultado(w["res"], w["seg"], w["hk"], w["seg_hk"])
 
-    def _mostrar_resultado(self, r, segundos):
-        self.v_tiempo.configure(text=f"{segundos:.2f} s")
+    def _mostrar_resultado(self, r, segundos, hk=None, segundos_hk=0.0):
+        self.v_tiempo.configure(text=f"{segundos:.3f} s")
         if r is None:
             self.v_costo.configure(text="Sin ruta", text_color=RUTA)
             self.v_ciclos.configure(text="0")
             self._texto_ruta("No existe ningún ciclo que pase por todos "
                              "los nodos una sola vez.")
+            self._texto_caminos("No existe ningún camino que pase por todos "
+                                "los nodos una sola vez.")
             return
 
         self.resultado = r
@@ -568,19 +654,86 @@ class App(ctk.CTk):
         self.v_ciclos.configure(text=fmt(r["ciclos"]))
 
         ruta = r["ruta"]
-        n = len(ruta) - 1
+        n = self.G.number_of_nodes()
         lineas = ["TRAMO          COSTO", "─" * 21]
         for a, b in zip(ruta, ruta[1:]):
             lineas.append(f"{a:>2} → {b:<2}  {self.G[a][b]['weight']:>10}")
         lineas += ["─" * 21, f"{'TOTAL':<8}{r['costo']:>13}", "",
                    "Ruta:", " → ".join(map(str, ruta)), "",
-                   "¿Por qué Held-Karp?",
-                   f"Fuerza bruta: {fmt(math.factorial(n - 1) // 2)} rutas",
-                   f"Held-Karp: ≈ {fmt(n * n * 2 ** n)} pasos"]
+                   "FUERZA BRUTA",
+                   f"(n−1)! rutas:    {fmt(math.factorial(n - 1))}",
+                   f"Evaluadas /2:    {fmt(r['evaluadas'])}",
+                   f"Caminos válidos: {fmt(r['ciclos'])}",
+                   f"Costo mínimo:    {fmt(r['costo'])}",
+                   f"Tiempo:          {segundos:.3f} s"]
+        # Comparación con Held-Karp: ambos deben dar el mismo costo mínimo
+        if hk:
+            igual = "✔ Mismo costo mínimo" if hk["costo"] == r["costo"] else "✘ Costos distintos"
+            lineas += ["", "HELD-KARP (comparación)",
+                       f"≈ n²·2ⁿ pasos:   {fmt(n * n * 2 ** n)}",
+                       f"Ciclos:          {fmt(hk['ciclos'])}",
+                       f"Costo mínimo:    {fmt(hk['costo'])}",
+                       f"Tiempo:          {segundos_hk:.3f} s",
+                       "", igual]
         self._texto_ruta("\n".join(lineas))
+        self._llenar_caminos(r)
 
         self._dibujar(ruta)
         self._actualizar_matriz(ruta)
+        self.tabs.set("Grafo")
+
+    def _llenar_caminos(self, r):
+        """Escribe en la pestaña «Todos los caminos» cada camino con su
+        etiqueta (C1, C2, ...), su costo y su recorrido. ★ = ruta óptima."""
+        n = self.G.number_of_nodes()
+        ancho = len(str(len(r["caminos"]))) + 1
+        cab = [f"Fuerza bruta: se evaluaron {fmt(r['evaluadas'])} rutas "
+               f"de {n} nodos y existen {fmt(r['ciclos'])} caminos.",
+               "★ = ruta óptima (menor costo)", "",
+               f"{'N°':<{ancho + 3}}{'COSTO':>7}   RECORRIDO",
+               "─" * (ancho + 16 + 5 * n)]
+        filas, optimas = [], []    # optimas = líneas que se pintan de verde
+        for i, c in enumerate(r["caminos"], start=1):
+            marca = "★" if c["costo"] == r["costo"] else " "
+            if marca == "★":
+                optimas.append(len(cab) + i)
+            filas.append(f"{'C' + str(i):<{ancho + 1}}{marca} {c['costo']:>7}   "
+                         + " → ".join(map(str, c["ruta"])))
+        self._texto_caminos("\n".join(cab + filas), optimas)
+
+    def ver_camino(self):
+        """Dibuja en el grafo el camino cuyo número se escribió (ej. 5 o C5)."""
+        if not self.resultado:
+            messagebox.showinfo("Sin caminos", "Primero calcula la ruta óptima.")
+            return
+        total = len(self.resultado["caminos"])
+        texto = self.entrada_camino.get().strip().upper().lstrip("C")
+        if not texto.isdigit() or not 1 <= int(texto) <= total:
+            messagebox.showerror("Número inválido",
+                                 f"Escribe un número de camino entre 1 y {total}.")
+            return
+        k = int(texto)
+        c = self.resultado["caminos"][k - 1]
+        self._detener_animacion()
+        self._dibujar(c["ruta"])
+        self._actualizar_matriz(c["ruta"])
+        extra = "  (es la ruta óptima)" if c["costo"] == self.resultado["costo"] else ""
+        self.lbl_sub.configure(text=f"Mostrando camino C{k}: "
+                                    f"{' → '.join(map(str, c['ruta']))}  ·  "
+                                    f"costo {c['costo']}{extra}")
+        self.tabs.set("Grafo")
+
+    def ver_optima(self):
+        """Vuelve a dibujar la ruta óptima."""
+        if not self.resultado:
+            messagebox.showinfo("Sin caminos", "Primero calcula la ruta óptima.")
+            return
+        self._detener_animacion()
+        ruta = self.resultado["ruta"]
+        self._dibujar(ruta)
+        self._actualizar_matriz(ruta)
+        self.lbl_sub.configure(text=f"Ruta óptima: {' → '.join(map(str, ruta))}  ·  "
+                                    f"costo {self.resultado['costo']}")
         self.tabs.set("Grafo")
 
     def animar(self):
@@ -638,21 +791,16 @@ class App(ctk.CTk):
         nx.draw_networkx_labels(G, pos, font_color="white", font_weight="bold",
                                 font_size=12, ax=ax)
 
-        # Pesos: si hay ruta, solo los de la ruta; si no, todos (si no saturan)
+        # Pesos: se muestran todos; los de la ruta seleccionada en naranja
         pesos = nx.get_edge_attributes(G, "weight")
-        if ruta:
-            etiquetas = {e: w for e, w in pesos.items() if frozenset(e) in en_ruta}
-        elif G.number_of_edges() <= 45:
-            etiquetas = pesos
-        else:
-            etiquetas = {}
-            ax.text(0.5, 0.01, "Hay muchas aristas: revisa los pesos en la pestaña "
-                    "«Matriz de adyacencia».", ha="center", color=SUAVE,
-                    fontsize=10, transform=ax.transAxes)
-        if etiquetas:
-            nx.draw_networkx_edge_labels(
-                G, pos, edge_labels=etiquetas, font_size=9, font_color=TEXTO,
-                bbox=dict(boxstyle="round,pad=0.25", fc=PANEL2, ec="none"), ax=ax)
+        normales = {e: w for e, w in pesos.items() if frozenset(e) not in en_ruta}
+        de_ruta = {e: w for e, w in pesos.items() if frozenset(e) in en_ruta}
+        for etiquetas, color in ((normales, SUAVE if ruta else TEXTO), (de_ruta, RUTA)):
+            if etiquetas:
+                nx.draw_networkx_edge_labels(
+                    G, pos, edge_labels=etiquetas, font_size=9, font_color=color,
+                    font_weight="bold" if color == RUTA else "normal",
+                    bbox=dict(boxstyle="round,pad=0.25", fc=PANEL2, ec="none"), ax=ax)
 
         ax.margins(0.1)
         self.canvas.draw_idle()
@@ -691,6 +839,18 @@ class App(ctk.CTk):
         self.caja_ruta.insert("1.0", texto)
         self.caja_ruta.configure(state="disabled")
 
+    def _texto_caminos(self, texto, resaltar=()):
+        """Reemplaza el texto de la pestaña de caminos y pinta de verde
+        las líneas indicadas (las rutas óptimas)."""
+        caja = self.caja_caminos
+        caja.configure(state="normal")
+        caja.delete("1.0", "end")
+        caja.insert("1.0", texto)
+        for linea in resaltar:
+            caja.tag_add("optima", f"{linea}.0", f"{linea}.end")
+        caja.tag_config("optima", foreground=EXITO)
+        caja.configure(state="disabled")
+
     # ------------------------------------------------------------------
     #  Ventanas informativas
     # ------------------------------------------------------------------
@@ -718,23 +878,34 @@ class App(ctk.CTk):
             "exactamente una vez y regresar, gastando lo menos posible. Esa ruta es "
             "un ciclo hamiltoniano de costo mínimo.\n\n"
             "PASOS\n"
-            "1. Elige la cantidad de nodos (8 a 16).\n"
+            f"1. Elige la cantidad de nodos ({MIN_NODOS} a {MAX_NODOS}).\n"
             "2. Elige el tipo de grafo:\n"
             "   • Completo: todos los nodos conectados entre sí.\n"
             "   • Parcial: conexiones al azar según la densidad.\n"
             "   • Manual: escribes cada conexión (origen destino costo).\n"
             "3. Presiona «Calcular ruta óptima».\n"
-            "4. Usa «Animar recorrido» para ver la ruta paso a paso.\n\n"
-            "EL ALGORITMO: HELD-KARP\n"
-            "Probar todas las rutas (fuerza bruta) cuesta (n−1)!/2: con 16 nodos "
-            "son más de 650 mil millones de rutas. Held-Karp guarda, para cada "
-            "subconjunto de nodos visitados y cada nodo final, el menor costo "
-            "encontrado, y reutiliza esos resultados (programación dinámica). "
-            "Así baja a unas n²·2ⁿ operaciones y resuelve 16 nodos en segundos, "
-            "sin dejar de ser exacto.\n\n"
+            "4. En la pestaña «Todos los caminos» verás cada camino existente "
+            "con su etiqueta (C1, C2, …), su recorrido y su costo. Escribe un "
+            "número y presiona «Dibujar» para verlo en el grafo.\n"
+            "5. Usa «Animar recorrido» para ver la ruta óptima paso a paso.\n\n"
+            "EL ALGORITMO: FUERZA BRUTA\n"
+            "Se fija el nodo 0 como inicio y se generan todas las permutaciones "
+            "de los demás nodos: (n−1)! rutas. Como recorrer un ciclo en un "
+            "sentido o en el otro cuesta lo mismo, solo se evalúa uno de los dos, "
+            "así que se revisan (n−1)!/2 rutas. Para cada una se suman los costos "
+            "de sus tramos; si algún tramo no existe en el grafo, la ruta se "
+            "descarta. Al final se guardan todos los caminos válidos y se elige "
+            "el de menor costo. Es exacto, pero crece muy rápido: con 10 nodos "
+            "ya son 181 440 rutas.\n\n"
+            "COMPARACIÓN: HELD-KARP\n"
+            "El programa también resuelve con Held-Karp (programación dinámica). "
+            "Guarda, para cada subconjunto de nodos visitados y cada nodo final, "
+            "el menor costo encontrado y reutiliza esos resultados. Así baja a "
+            "unas n²·2ⁿ operaciones. Debe dar el mismo costo mínimo que la fuerza "
+            "bruta pero en menos tiempo; el panel de resultados muestra ambos.\n\n"
             "¿CUÁNDO NO HAY SOLUCIÓN?\n"
             "Si el grafo no es conexo o algún nodo tiene menos de 2 conexiones, "
-            "no puede existir un ciclo hamiltoniano."), alto=620)
+            "no puede existir un ciclo hamiltoniano."), alto=700)
 
     def abrir_creditos(self):
         v = ctk.CTkToplevel(self)
