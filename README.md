@@ -15,38 +15,52 @@ Aplicación de escritorio en Python que encuentra la **ruta de menor costo** que
 
 ## Funcionalidades
 
-- Grafos de 3 a 9 nodos (arranca en 5): **completos**, **parciales** (densidad ajustable) o **manuales**.
+- Grafos de 3 a 16 nodos (arranca en 5), con nodos nombrados por letras (A, B, C…): **completos**, **parciales** (densidad ajustable) o **manuales**.
+- Botón **Cargar ejemplo de clase**: el grafo de 5 nodos resuelto en clase.
 - Visualización del grafo (con el peso de todas sus aristas) y de su **matriz de adyacencia**.
 - Cálculo exacto de la ruta óptima con el algoritmo de **fuerza bruta**.
-- Pestaña **Todos los caminos**: lista cada camino existente con su etiqueta (C1, C2, …), su costo, su recorrido, su inverso y la suma de sus tramos, y marca la ruta óptima con ★. Se muestra por páginas de 500.
-- Dibujar cualquier camino de la lista en el grafo escribiendo su número.
+- Pestaña **Todos los caminos**: tabla con cada camino (C1, C2, …), sus vértices V1…V(n+1), sus pesos P1…Pn y su total; la ruta óptima se marca con ✓ y se escribe al final (por ejemplo `ADCBEA = 38`). Se muestra por páginas de 500.
+- Dibujar cualquier camino de la tabla en el grafo escribiendo su número.
 - Animación del recorrido óptimo paso a paso.
 - Diagnóstico cuando no existe solución (grafo no conexo o nodos con grado < 2).
 
 ## Algoritmo: fuerza bruta
 
-Se parte del nodo 0 y se prueban **todas las opciones de recorrido** (búsqueda exhaustiva con retroceso), sin generar permutaciones:
+Se parte del nodo A y se prueban **todas las opciones de recorrido** (búsqueda exhaustiva con retroceso), sin generar permutaciones:
 
 1. Desde el nodo actual se avanza a cada vecino que aún no se visitó, sumando el costo de la arista.
-2. Cuando ya se pasó por los `n` nodos y existe la arista de regreso al 0, se cierra el ciclo y se guarda como un camino existente.
+2. Cuando ya se pasó por los `n` nodos y existe la arista de regreso a A, se cierra el ciclo.
 3. Se retrocede un paso y se prueba el siguiente vecino, hasta agotar todas las posibilidades.
 4. La ruta óptima es el camino de menor costo.
 
-Como solo se avanza por aristas que existen, nunca se arma una ruta imposible. Cada ciclo aparece dos veces (en un sentido y al revés) con el mismo costo; la lista indica cuál es el inverso de cada camino.
+Cada ciclo aparece dos veces, en un sentido y al revés, con el mismo costo (`ABCDEA` = `AEDCBA`). Solo se anota uno: aquel cuyo 2.º vértice va antes en el alfabeto que el penúltimo. Por eso en un grafo completo quedan **`(n−1)!/2`** caminos.
 
-En un grafo completo hay `(n−1)!` caminos; en uno parcial, menos.
-
-| Nodos | Caminos en un grafo completo `(n−1)!` |
+| Nodos | Caminos `(n−1)!/2` |
 |---|---|
-| 3 | 2 |
-| 4 | 6 |
-| 5 | 24 |
-| 6 | 120 |
-| 7 | 720 |
-| 8 | 5 040 |
-| 9 | 40 320 |
+| 3 | 1 |
+| 4 | 3 |
+| 5 | 12 |
+| 6 | 60 |
+| 7 | 360 |
+| 8 | 2 520 |
+| 9 | 20 160 |
+| 10 | 181 440 |
+| 11 | 1 814 400 |
+| 12 | 19 958 400 |
+| 13 | 239 500 800 |
+| 14 | 3 113 510 400 |
+| 15 | 43 589 145 600 |
+| 16 | 653 837 184 000 |
 
 Complejidad: **O(n!)**.
+
+En un grafo completo la búsqueda termina en segundos hasta unos 10–11 nodos. Si pasa de **60 segundos** se detiene y el programa muestra cuántos caminos revisó, cuánto tardaría en revisarlos todos (con 16 nodos, días o semanas) y el mejor camino hallado hasta ese momento. La tabla guarda hasta 200 000 caminos; la ruta óptima siempre considera todos.
+
+### Ejemplo de clase (5 nodos)
+
+Aristas: AB 10, AC 18, AD 9, AE 6, BC 3, BD 15, BE 4, CD 16, CE 14, DE 5.
+
+`(5−1)!/2 = 24/2 = 12` caminos. La ruta óptima es **`ADCBEA = 9 + 16 + 3 + 4 + 6 = 38`**.
 
 ## Instalación y uso
 
@@ -61,7 +75,7 @@ python main.py
 4. Revisa la pestaña **Todos los caminos** (usa ◀ ▶ para cambiar de página) y dibuja el que quieras.
 5. Opcional: **Animar recorrido**.
 
-En el modo manual, las conexiones se escriben una por línea con el formato `origen destino costo` (por ejemplo `0 3 25`).
+En el modo manual, las conexiones se escriben una por línea con el formato `origen destino costo` (por ejemplo `A D 25`).
 
 ## Integrantes
 

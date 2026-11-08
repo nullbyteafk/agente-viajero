@@ -46,10 +46,20 @@ INTEGRANTES = [            # (nombre, código)
 ]
 LOGO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "upc_logo.png")
 
-MIN_NODOS, MAX_NODOS = 3, 9   # se permite bajar a 3 por si acaso
+MIN_NODOS, MAX_NODOS = 3, 16  # se permite bajar a 3 por si acaso
 NODOS_INICIO = 5              # el programa arranca con 5 nodos
 POR_PAGINA = 500              # caminos que se muestran por página
+LIMITE_SEG = 60               # tiempo máximo de la fuerza bruta (segundos)
+MAX_GUARDADOS = 200_000       # caminos que se guardan para la tabla
 PESO_MIN, PESO_MAX = 9, 100
+
+# Los nodos se nombran con letras: 0 = A, 1 = B, 2 = C, ...
+LETRAS = "ABCDEFGHIJKLMNOP"
+
+# Ejemplo resuelto en clase (5 nodos, grafo completo)
+EJEMPLO_CLASE = [("A", "B", 10), ("A", "C", 18), ("A", "D", 9), ("A", "E", 6),
+                 ("B", "C", 3), ("B", "D", 15), ("B", "E", 4),
+                 ("C", "D", 16), ("C", "E", 14), ("D", "E", 5)]
 
 # =====================================================================
 #  ESTILO
@@ -88,6 +98,25 @@ def grafo_aleatorio(n, completo=True, densidad=0.45):
     return G
 
 
+def letra(v):
+    """Nombre de un nodo: 0 -> 'A', 1 -> 'B', ..."""
+    return LETRAS[v]
+
+
+def nombre_ruta(ruta):
+    """[0, 2, 1, 4, 3, 0] -> 'ACBEDA'"""
+    return "".join(letra(v) for v in ruta)
+
+
+def grafo_ejemplo_clase():
+    """Grafo del ejemplo resuelto en clase."""
+    G = nx.Graph()
+    G.add_nodes_from(range(5))
+    for u, v, w in EJEMPLO_CLASE:
+        G.add_edge(LETRAS.index(u), LETRAS.index(v), weight=w)
+    return G
+
+
 def grafo_desde_texto(n, texto):
     """Lee conexiones con el formato 'origen destino costo' (una por línea).
     Devuelve el grafo y una lista de errores encontrados."""
@@ -102,14 +131,17 @@ def grafo_desde_texto(n, texto):
         if len(partes) != 3:
             errores.append(f"Línea {num}: se esperan 3 valores (origen destino costo).")
             continue
-        try:
-            u, v, w = map(int, partes)
-        except ValueError:
-            errores.append(f"Línea {num}: solo se aceptan números enteros.")
+        a, b = partes[0].upper(), partes[1].upper()
+        if a not in LETRAS[:n] or b not in LETRAS[:n] or len(a) != 1 or len(b) != 1:
+            errores.append(f"Línea {num}: los nodos van de A a {LETRAS[n - 1]}.")
             continue
-        if not (0 <= u < n and 0 <= v < n):
-            errores.append(f"Línea {num}: los nodos van de 0 a {n - 1}.")
-        elif u == v:
+        try:
+            w = int(partes[2])
+        except ValueError:
+            errores.append(f"Línea {num}: el costo debe ser un número entero.")
+            continue
+        u, v = LETRAS.index(a), LETRAS.index(b)
+        if u == v:
             errores.append(f"Línea {num}: un nodo no puede conectarse consigo mismo.")
         elif w <= 0:
             errores.append(f"Línea {num}: el costo debe ser mayor que 0.")
@@ -133,7 +165,7 @@ def diagnostico(G):
         return "El grafo no es conexo: hay nodos a los que no se puede llegar."
     pocos = [v for v, d in G.degree() if d < 2]
     if pocos:
-        return (f"Los nodos {pocos} tienen menos de 2 conexiones. "
+        return (f"Los nodos {', '.join(letra(v) for v in pocos)} tienen menos de 2 conexiones. "
                 "Un ciclo necesita entrar y salir de cada nodo.")
     return None
 
@@ -149,67 +181,92 @@ def costo_ruta(M, ruta):
     return total
 
 
-def fuerza_bruta(M):
+def fuerza_bruta(M, limite_seg=None):
     """
     Algoritmo de fuerza bruta (búsqueda exhaustiva, sin permutaciones).
 
-    Se recorre el grafo desde el nodo 0 probando TODAS las opciones:
+    Se recorre el grafo desde el nodo A probando TODAS las opciones:
       1. Desde el nodo actual se intenta ir a cada vecino que aún no se visitó.
       2. Se avanza a ese vecino, se suma el costo de la arista y se repite.
       3. Cuando ya se visitaron los n nodos, si existe la arista de regreso
-         al nodo 0, se cierra el ciclo y se guarda como un camino existente.
+         a A, se cierra el ciclo.
       4. Luego se retrocede (se desmarca el último nodo) y se prueba el
          siguiente vecino, hasta agotar todas las posibilidades.
       5. La ruta óptima es el camino de menor costo.
 
-    Como solo se avanza por aristas que existen, nunca se arma una ruta
-    imposible. En un grafo completo se encuentran (n-1)! caminos: cada ciclo
-    aparece dos veces (en un sentido y al revés) y ambos cuestan lo mismo.
+    Cada ciclo se encuentra dos veces: en un sentido y al revés, con el mismo
+    costo (A-B-C-D-E-A = A-E-D-C-B-A). Solo se anota una de las dos: la que
+    tiene el 2.º vértice antes (en orden alfabético) que el penúltimo.
+    Por eso en un grafo completo quedan (n-1)!/2 caminos: con 5 nodos, 12.
 
-    Complejidad: O(n!) en el peor caso.
+    Complejidad: O(n!). Con muchos nodos la búsqueda no termina en un tiempo
+    razonable, por eso se puede fijar un límite de segundos (limite_seg).
     """
     n = len(M)
-    caminos = []                 # todos los caminos que cierran el ciclo
+    caminos = []                 # caminos guardados para la tabla
+    total = 0                    # caminos distintos encontrados
+    mejor = None                 # (costo, ruta) del mejor camino
     visitado = [False] * n
     visitado[0] = True
-    ruta = [0]                   # el recorrido siempre empieza en el nodo 0
+    ruta = [0]                   # el recorrido siempre empieza en A
     pasos = 0                    # cuántas veces se avanzó a un nodo
+    vueltas = 0                  # ciclos cerrados contando ambos sentidos
+    inicio = time.perf_counter()
+
+    class SeAcaboElTiempo(Exception):
+        pass
 
     def explorar(actual, costo):
-        nonlocal pasos
+        nonlocal pasos, vueltas, total, mejor
         if len(ruta) == n:                       # ya se visitaron todos
-            if M[actual][0] > 0:                 # ¿se puede volver al 0?
-                caminos.append({"ruta": ruta + [0],
-                                "costo": costo + M[actual][0]})
+            if M[actual][0] > 0:                 # ¿se puede volver a A?
+                vueltas += 1
+                if ruta[1] < ruta[-1]:           # quedarse con un solo sentido
+                    c = costo + M[actual][0]
+                    total += 1
+                    if total <= MAX_GUARDADOS:
+                        caminos.append({"ruta": ruta + [0], "costo": c})
+                    if mejor is None or c < mejor[0]:
+                        mejor = (c, ruta + [0])
             return
         for sig in range(n):
             if not visitado[sig] and M[actual][sig] > 0:
+                pasos += 1
+                if (limite_seg and pasos % 20000 == 0
+                        and time.perf_counter() - inicio > limite_seg):
+                    raise SeAcaboElTiempo
                 visitado[sig] = True             # avanzar
                 ruta.append(sig)
-                pasos += 1
                 explorar(sig, costo + M[actual][sig])
                 ruta.pop()                       # retroceder
                 visitado[sig] = False
 
-    explorar(0, 0)
+    terminado = True
+    try:
+        explorar(0, 0)
+    except SeAcaboElTiempo:
+        terminado = False
 
-    if not caminos:
-        return None
-
-    # Cada camino tiene un inverso: el mismo ciclo recorrido al revés
-    indice = {tuple(c["ruta"]): i for i, c in enumerate(caminos)}
-    for c in caminos:
-        c["inverso"] = indice.get(tuple(reversed(c["ruta"])))
-
-    mejor = min(caminos, key=lambda c: c["costo"])
+    if mejor is None and terminado:
+        return None                              # no existe ningún ciclo
     return {
-        "costo": mejor["costo"],
-        "ruta": mejor["ruta"],
+        "terminado": terminado,
+        "costo": mejor[0] if mejor else None,
+        "ruta": mejor[1] if mejor else None,
         "caminos": caminos,
-        "total": len(caminos),          # caminos encontrados (ambos sentidos)
-        "ciclos": len(caminos) // 2,    # ciclos distintos
+        "total": total,                 # ciclos distintos (un sentido)
+        "vueltas": vueltas,             # contando ambos sentidos
         "pasos": pasos,
     }
+
+
+def duracion(seg):
+    """Convierte segundos a un texto legible (min, horas, días, años)."""
+    for unidad, tam in (("años", 31_536_000), ("días", 86_400),
+                        ("horas", 3_600), ("minutos", 60)):
+        if seg >= tam:
+            return f"{fmt(round(seg / tam))} {unidad}"
+    return f"{seg:.0f} segundos"
 
 
 def fmt(num):
@@ -247,7 +304,7 @@ class VentanaManual(ctk.CTkToplevel):
                      text_color=TEXTO).pack(anchor="w", padx=24, pady=(20, 2))
         ctk.CTkLabel(self, justify="left", font=(F, 13), text_color=SUAVE,
                      text=(f"Una conexión por línea:  origen  destino  costo\n"
-                           f"Nodos disponibles: 0 a {n - 1}   ·   Ejemplo:  0 3 25")
+                           f"Nodos disponibles: A a {LETRAS[n - 1]}   ·   Ejemplo:  A D 25")
                      ).pack(anchor="w", padx=24, pady=(0, 10))
 
         self.caja = ctk.CTkTextbox(self, font=(MONO, 15), fg_color=PANEL,
@@ -273,11 +330,11 @@ class VentanaManual(ctk.CTkToplevel):
 
     def _ejemplo(self):
         """Un anillo (garantiza un ciclo) más algunas cuerdas al azar."""
-        lineas = [f"{i} {(i + 1) % self.n} {random.randint(PESO_MIN, PESO_MAX)}"
-                  for i in range(self.n)]
+        lineas = [f"{letra(i)} {letra((i + 1) % self.n)} "
+                  f"{random.randint(PESO_MIN, PESO_MAX)}" for i in range(self.n)]
         for _ in range(self.n):
             u, v = random.sample(range(self.n), 2)
-            lineas.append(f"{u} {v} {random.randint(PESO_MIN, PESO_MAX)}")
+            lineas.append(f"{letra(u)} {letra(v)} {random.randint(PESO_MIN, PESO_MAX)}")
         self.caja.delete("1.0", "end")
         self.caja.insert("1.0", "\n".join(lineas))
 
@@ -388,6 +445,10 @@ class App(ctk.CTk):
             font=(F, 15, "bold"), fg_color=ACENTO, hover_color=ACENTO_H,
             command=self.generar)
         self.btn_generar.pack(fill="x", padx=22, pady=(4, 0))
+        ctk.CTkButton(p, text="Cargar ejemplo de clase (5 nodos)", height=32,
+                      corner_radius=10, font=(F, 13), fg_color="transparent",
+                      border_width=1, border_color=BORDE, hover_color=PANEL2,
+                      command=self.cargar_ejemplo).pack(fill="x", padx=22, pady=(8, 0))
 
         # --- Paso 2: resolver ---
         self._titulo_paso(p, "2", "Encuentra la ruta óptima")
@@ -535,6 +596,13 @@ class App(ctk.CTk):
                             densidad=self.slider_dens.get())
         self._usar_grafo(G)
 
+    def cargar_ejemplo(self):
+        """Carga el grafo del ejemplo resuelto en clase."""
+        self._detener_animacion()
+        self.slider_nodos.set(5)
+        self.lbl_nodos.configure(text="Cantidad de nodos: 5")
+        self._usar_grafo(grafo_ejemplo_clase())
+
     def _usar_grafo(self, G):
         """Reemplaza el grafo actual (antes se acumulaban aristas viejas)."""
         self.G = G
@@ -542,7 +610,7 @@ class App(ctk.CTk):
         self.resultado = None
         n, m = G.number_of_nodes(), G.number_of_edges()
         self.lbl_estado.configure(text=f"Grafo de {n} nodos y {m} aristas")
-        self.lbl_sub.configure(text="Nodo verde = punto de partida (0).  "
+        self.lbl_sub.configure(text="Nodo verde = punto de partida (A).  "
                                     "Ahora presiona «Calcular ruta óptima».")
         for v in (self.v_costo, self.v_ciclos, self.v_tiempo):
             v.configure(text="—", text_color=TEXTO)
@@ -578,7 +646,7 @@ class App(ctk.CTk):
         def tarea():
             # Fuerza bruta: da la ruta óptima y todos los caminos existentes
             t0 = time.perf_counter()
-            self._trabajo["res"] = fuerza_bruta(M)
+            self._trabajo["res"] = fuerza_bruta(M, LIMITE_SEG)
             self._trabajo["seg"] = time.perf_counter() - t0
             self._trabajo["listo"] = True
 
@@ -607,21 +675,27 @@ class App(ctk.CTk):
                                 "los nodos una sola vez.")
             return
 
+        if not r["terminado"]:
+            self._sin_terminar(r, segundos)
+            return
+
         self.resultado = r
         self.v_costo.configure(text=fmt(r["costo"]), text_color=EXITO)
         self.v_ciclos.configure(text=fmt(r["total"]))
 
         ruta = r["ruta"]
         n = self.G.number_of_nodes()
+        f1 = math.factorial(n - 1)
         lineas = ["TRAMO          COSTO", "─" * 21]
         for a, b in zip(ruta, ruta[1:]):
-            lineas.append(f"{a:>2} → {b:<2}  {self.G[a][b]['weight']:>10}")
+            lineas.append(f" {letra(a)} → {letra(b)}   {self.G[a][b]['weight']:>11}")
         lineas += ["─" * 21, f"{'TOTAL':<8}{r['costo']:>13}", "",
-                   "Ruta:", " → ".join(map(str, ruta)), "",
+                   "Ruta óptima:", f"{nombre_ruta(ruta)} = {r['costo']}", "",
                    "FUERZA BRUTA",
+                   "(n−1)!/2 =",
+                   f"({n}−1)!/2 = {fmt(f1)}/2 = {fmt(f1 // 2)}",
+                   "",
                    f"Caminos hallados: {fmt(r['total'])}",
-                   f"Ciclos distintos: {fmt(r['ciclos'])}",
-                   f"Máximo (n−1)!:    {fmt(math.factorial(n - 1))}",
                    f"Avances probados: {fmt(r['pasos'])}",
                    f"Costo mínimo:     {fmt(r['costo'])}",
                    f"Tiempo:           {segundos:.3f} s"]
@@ -632,10 +706,40 @@ class App(ctk.CTk):
         self._actualizar_matriz(ruta)
         self.tabs.set("Grafo")
 
+    def _sin_terminar(self, r, segundos):
+        """La fuerza bruta superó el límite de tiempo: se explica por qué."""
+        n = self.G.number_of_nodes()
+        f1 = math.factorial(n - 1)
+        posibles = f1 // 2
+        # ritmo medido: ciclos cerrados (ambos sentidos) por segundo
+        ritmo = max(r["vueltas"], 1) / max(segundos, 1e-9)
+        estimado = f1 / ritmo
+        self.v_costo.configure(text="Sin terminar", text_color=RUTA)
+        self.v_ciclos.configure(text=f"≥ {fmt(r['total'])}")
+        lineas = [f"La fuerza bruta se detuvo a los {LIMITE_SEG} s sin terminar.", "",
+                  f"Con {n} nodos hay hasta",
+                  f"(n−1)!/2 = ({n}−1)!/2 =",
+                  f"{fmt(posibles)} caminos.", "",
+                  f"Revisó {fmt(r['total'])} en {segundos:.0f} s.",
+                  "Para revisarlos todos (grafo completo)",
+                  f"tardaría unos {duracion(estimado)}.", "",
+                  "Esto muestra por qué la fuerza bruta",
+                  "es O(n!): cada nodo extra multiplica",
+                  "el trabajo."]
+        if r["ruta"]:
+            lineas += ["", "Mejor camino hallado hasta ahora",
+                       "(no se garantiza que sea el óptimo):",
+                       f"{nombre_ruta(r['ruta'])} = {r['costo']}"]
+        self._texto_ruta("\n".join(lineas))
+        self._texto_caminos("\n".join(lineas))
+        self._dibujar(r["ruta"])
+        self._actualizar_matriz(r["ruta"])
+        self.tabs.set("Grafo")
+
     def _llenar_caminos(self, pagina=0):
-        """Escribe en la pestaña «Todos los caminos» cada camino existente con
-        su etiqueta (C1, C2, ...), su costo, su recorrido, su inverso y la suma
-        de sus tramos. ★ = ruta óptima. Se muestra por páginas."""
+        """Escribe en la pestaña «Todos los caminos» la tabla del método de
+        fuerza bruta: vértices V1..V(n+1), pesos P1..Pn y el total de cada
+        camino. ✓ = ruta óptima. Se muestra por páginas."""
         r = self.resultado
         caminos = r["caminos"]
         total = len(caminos)
@@ -645,30 +749,35 @@ class App(ctk.CTk):
         fin = min(total, ini + POR_PAGINA)
 
         n = self.G.number_of_nodes()
-        w_id = len(str(total)) + 2              # ancho de la etiqueta "C123"
-        w_rec = 4 * n + 1                       # ancho de "0 → 1 → ... → 0"
-        w_inv = max(len("INVERSO"), w_id) + 2
-        cab = [f"Fuerza bruta desde el nodo 0: {fmt(total)} caminos existentes "
-               f"({fmt(r['ciclos'])} ciclos distintos, cada uno en ambos sentidos).",
-               "★ = ruta óptima (menor costo)   ·   INVERSO = el mismo ciclo "
-               "recorrido al revés (mismo costo)", "",
-               f"{'N°':<{w_id + 2}}{'COSTO':>7}   {'RECORRIDO':<{w_rec}}   "
-               f"{'INVERSO':<{w_inv}}SUMA DE TRAMOS",
-               "─" * (w_id + 12 + w_rec + w_inv + 6 * n)]
+        f1 = math.factorial(n - 1)
+        w_id = max(len(str(total)) + 2, 4)       # ancho de "C123"
+        wv, wp = 4, 5                            # ancho de cada V y cada P
+        enc = (f"{'N°':<{w_id}}"
+               + "".join(f"{'V' + str(k):<{wv}}" for k in range(1, n + 2)) + "  "
+               + "".join(f"{'P' + str(k):>{wp}}" for k in range(1, n + 1))
+               + f"{'TOTAL':>8}")
+        cab = [f"(n−1)!/2 = ({n}−1)!/2 = {fmt(f1)}/2 = {fmt(f1 // 2)} caminos posibles"
+               f"   ·   existen en este grafo: {fmt(total)}",
+               f"Ruta óptima: {nombre_ruta(r['ruta'])} = {r['costo']}   (✓ = menor costo)",
+               "", enc, "─" * (len(enc) + 3)]
         filas, optimas = [], []    # optimas = líneas que se pintan de verde
         for i in range(ini, fin):
             c = caminos[i]
             ruta = c["ruta"]
-            marca = "★" if c["costo"] == r["costo"] else " "
-            if marca == "★":
+            marca = "  ✓" if c["costo"] == r["costo"] else ""
+            if marca:
                 optimas.append(len(cab) + len(filas) + 1)
-            inv = f"C{c['inverso'] + 1}" if c["inverso"] is not None else "—"
-            suma = " + ".join(str(self.G[a][b]["weight"])
-                              for a, b in zip(ruta, ruta[1:]))
-            filas.append(f"{'C' + str(i + 1):<{w_id}}{marca} {c['costo']:>7}   "
-                         f"{' → '.join(map(str, ruta)):<{w_rec}}   "
-                         f"{inv:<{w_inv}}{suma}")
-        self._texto_caminos("\n".join(cab + filas), optimas)
+            filas.append(f"{'C' + str(i + 1):<{w_id}}"
+                         + "".join(f"{letra(v):<{wv}}" for v in ruta) + "  "
+                         + "".join(f"{self.G[a][b]['weight']:>{wp}}"
+                                   for a, b in zip(ruta, ruta[1:]))
+                         + f"{c['costo']:>8}{marca}")
+        if total < r["total"]:
+            cab.insert(2, f"Se muestran los primeros {fmt(total)} caminos de "
+                          f"{fmt(r['total'])} (la ruta óptima sí considera todos).")
+            optimas = [x + 1 for x in optimas]
+        pie = ["", f"{nombre_ruta(r['ruta'])} = {r['costo']}"]
+        self._texto_caminos("\n".join(cab + filas + pie), optimas)
         self.lbl_pagina.configure(
             text=f"C{ini + 1}–C{fin} de {fmt(total)}  ·  pág. {self.pagina + 1}/{paginas}")
 
@@ -696,8 +805,7 @@ class App(ctk.CTk):
         self._actualizar_matriz(c["ruta"])
         extra = "  (es una ruta óptima)" if c["costo"] == self.resultado["costo"] else ""
         self.lbl_sub.configure(text=f"Mostrando camino C{k}: "
-                                    f"{' → '.join(map(str, c['ruta']))}  ·  "
-                                    f"costo {c['costo']}{extra}")
+                                    f"{nombre_ruta(c['ruta'])} = {c['costo']}{extra}")
         self.tabs.set("Grafo")
 
     def ver_optima(self):
@@ -709,8 +817,8 @@ class App(ctk.CTk):
         ruta = self.resultado["ruta"]
         self._dibujar(ruta)
         self._actualizar_matriz(ruta)
-        self.lbl_sub.configure(text=f"Ruta óptima: {' → '.join(map(str, ruta))}  ·  "
-                                    f"costo {self.resultado['costo']}")
+        self.lbl_sub.configure(text=f"Ruta óptima: {nombre_ruta(ruta)} = "
+                                    f"{self.resultado['costo']}")
         self.tabs.set("Grafo")
 
     def animar(self):
@@ -763,10 +871,13 @@ class App(ctk.CTk):
                                    width=3.5, ax=ax)
 
         colores = [EXITO if v == 0 else NODO for v in G.nodes()]
-        nx.draw_networkx_nodes(G, pos, node_color=colores, node_size=700,
+        grande = G.number_of_nodes() > 10
+        nx.draw_networkx_nodes(G, pos, node_color=colores,
+                               node_size=420 if grande else 700,
                                edgecolors=TEXTO, linewidths=1.2, ax=ax)
-        nx.draw_networkx_labels(G, pos, font_color="white", font_weight="bold",
-                                font_size=12, ax=ax)
+        nx.draw_networkx_labels(G, pos, labels={v: letra(v) for v in G.nodes()},
+                                font_color="white", font_weight="bold",
+                                font_size=10 if grande else 12, ax=ax)
 
         # Pesos: se muestran todos; los de la ruta seleccionada en naranja
         pesos = nx.get_edge_attributes(G, "weight")
@@ -775,7 +886,7 @@ class App(ctk.CTk):
         for etiquetas, color in ((normales, SUAVE if ruta else TEXTO), (de_ruta, RUTA)):
             if etiquetas:
                 nx.draw_networkx_edge_labels(
-                    G, pos, edge_labels=etiquetas, font_size=9, font_color=color,
+                    G, pos, edge_labels=etiquetas, font_size=7 if grande else 9, font_color=color,
                     font_weight="bold" if color == RUTA else "normal",
                     bbox=dict(boxstyle="round,pad=0.25", fc=PANEL2, ec="none"), ax=ax)
 
@@ -793,10 +904,10 @@ class App(ctk.CTk):
 
         M = matriz_adyacencia(self.G)
         n = len(M)
-        lineas = ["    │" + "".join(f"{j:>4}" for j in range(n)),
+        lineas = ["    │" + "".join(f"{letra(j):>4}" for j in range(n)),
                   "────┼" + "────" * n]
         for i in range(n):
-            lineas.append(f"{i:>3} │" + "".join(
+            lineas.append(f"{letra(i):>3} │" + "".join(
                 f"{(M[i][j] if M[i][j] else '·'):>4}" for j in range(n)))
         pie = "\n\n· = no hay conexión directa entre esos nodos"
         if ruta:
@@ -852,7 +963,7 @@ class App(ctk.CTk):
     def abrir_guia(self):
         self._ventana_info("¿Cómo funciona?", (
             "EL PROBLEMA\n"
-            "Un agente debe salir de una ciudad (nodo 0), visitar todas las demás "
+            "Un agente debe salir de una ciudad (nodo A), visitar todas las demás "
             "exactamente una vez y regresar, gastando lo menos posible. Esa ruta es "
             "un ciclo hamiltoniano de costo mínimo.\n\n"
             "PASOS\n"
@@ -860,23 +971,30 @@ class App(ctk.CTk):
             "2. Elige el tipo de grafo:\n"
             "   • Completo: todos los nodos conectados entre sí.\n"
             "   • Parcial: conexiones al azar según la densidad.\n"
-            "   • Manual: escribes cada conexión (origen destino costo).\n"
+            "   • Manual: escribes cada conexión (origen destino costo), "
+            "por ejemplo  A D 25.\n"
+            "   • O usa «Cargar ejemplo de clase».\n"
             "3. Presiona «Calcular ruta óptima».\n"
-            "4. En la pestaña «Todos los caminos» verás cada camino existente "
-            "con su etiqueta (C1, C2, …), su recorrido y su costo. Escribe un "
-            "número y presiona «Dibujar» para verlo en el grafo.\n"
+            "4. En la pestaña «Todos los caminos» está la tabla: vértices "
+            "V1…V(n+1), pesos P1…Pn y el total de cada camino (C1, C2, …). "
+            "Escribe un número y presiona «Dibujar» para verlo en el grafo.\n"
             "5. Usa «Animar recorrido» para ver la ruta óptima paso a paso.\n\n"
             "EL ALGORITMO: FUERZA BRUTA\n"
-            "Se parte del nodo 0 y se prueban todas las opciones de recorrido: "
-            "desde el nodo actual se avanza a cada vecino que aún no se visitó, "
-            "sumando el costo de la arista. Cuando ya se pasó por todos los nodos "
-            "y existe la arista de regreso al 0, se cierra el ciclo y se guarda "
-            "como un camino existente. Después se retrocede un paso y se prueba "
-            "el siguiente vecino, hasta agotar todas las posibilidades. Al final "
-            "se elige el camino de menor costo.\n\n"
+            "Se parte de A y se prueban todas las opciones de recorrido: desde el "
+            "nodo actual se avanza a cada vecino que aún no se visitó, sumando el "
+            "costo de la arista. Cuando ya se pasó por todos los nodos y existe la "
+            "arista de regreso a A, se cierra el ciclo. Después se retrocede un "
+            "paso y se prueba el siguiente vecino, hasta agotar todas las "
+            "posibilidades. Al final se elige el camino de menor costo.\n\n"
             "Cada ciclo aparece dos veces (en un sentido y al revés) con el mismo "
-            "costo; en la lista se indica cuál es el inverso de cada camino. En un "
-            "grafo completo hay (n−1)! caminos: con 9 nodos ya son 40 320.\n\n"
+            "costo, por ejemplo ABCDEA y AEDCBA. Solo se anota uno: aquel cuyo "
+            "2.º vértice va antes en el alfabeto que el penúltimo. Así quedan "
+            "(n−1)!/2 caminos: con 5 nodos, (5−1)!/2 = 24/2 = 12.\n\n"
+            "LÍMITE DE TIEMPO\n"
+            "La cantidad de caminos crece como un factorial: con 10 nodos son "
+            "181 440, con 12 casi 20 millones y con 16 más de 650 mil millones. "
+            f"Si el cálculo pasa de {LIMITE_SEG} segundos se detiene y el "
+            "programa estima cuánto tardaría en terminar.\n\n"
             "¿CUÁNDO NO HAY SOLUCIÓN?\n"
             "Si el grafo no es conexo o algún nodo tiene menos de 2 conexiones, "
             "no puede existir un ciclo hamiltoniano."), alto=700)
